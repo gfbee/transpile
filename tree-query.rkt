@@ -2,6 +2,8 @@
 
 (provide depth prune share)
 
+(require racket/trace) ; See usage of (trace <id>) later in the code.
+
 (module+ test (require rackunit)
   
   ; Quick tests/examples of nested lists, by just quoting some code.
@@ -66,6 +68,10 @@
           [(and (list? t1) (list? t2) (= (length t1) (length t2)))
            (map share′ t1 t2)]
           [else difference-marker]))
+  (trace share′)
   (for/fold ([t (first trees)])
             ([t′ (rest trees)])
     (share′ t t′)))
+
+(trace depth prune share)
+
