@@ -1,6 +1,6 @@
 #lang racket
 
-(provide depth prune share)
+(provide depth prune share tags)
 
 (require racket/trace) ; See usage of (trace <id>) later in the code.
 
@@ -68,10 +68,14 @@
           [(and (list? t1) (list? t2) (= (length t1) (length t2)))
            (map share′ t1 t2)]
           [else difference-marker]))
-  (trace share′)
+  #;(trace share′)
   (for/fold ([t (first trees)])
             ([t′ (rest trees)])
     (share′ t t′)))
 
-(trace depth prune share)
+#;(trace depth prune share)
 
+(define (tags t)
+  (match t
+    [`(,label . ,t) `(,label . ,(append-map tags t))]
+    [else '()]))
