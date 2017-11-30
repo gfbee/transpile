@@ -103,6 +103,10 @@
 ; Non-symbol/list tags [all would be strings, by above].
 (filter (not/c (or/c symbol? list?)) (tags ast))
 
+; To use with ‘index’.
+(length (filter (λ (l) (> (length l) 1))
+                (group-by identity (filter list? (parts ast)))))
+
 (define symbol string->symbol)
 (define (from-singleton l) (match l [`(,e) e]))
 (define (untag pair) (match pair [`(,_ ,e) e]))

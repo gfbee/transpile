@@ -22,7 +22,8 @@
  Top shared between trees: ‘share’. |#
 
 (provide tags parts
-         depth prune share)
+         depth prune share
+         index)
 
 
 (require racket/trace) ; See usage of (trace <id>) later in the code.
@@ -125,3 +126,10 @@
     (share′ t t′)))
 
 #;(trace depth prune share)
+
+(define (index t an-index)
+  (dict-ref an-index t
+            (λ () (if (list? t)
+                      (map (curryr index an-index) t)
+                      t))))
+
