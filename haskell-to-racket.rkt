@@ -43,10 +43,9 @@
         [else (list j)]))
 
 (define (collapse j)
-  (cond [(hash? j) (define result (for/list ([(k v) (in-dict j)]) (list k (collapse v))))
-                   (if (= (length result) 1) (first result) result)]
-        [(list? j) (define result (map collapse j))
-                   (if (= (length result) 1) (first result) result)]
+  (define (L result) (if (= (length result) 1) (first result) `(: . ,result)))
+  (cond [(hash? j) (L (for/list ([(k v) (in-dict j)]) (list k (collapse v))))]
+        [(list? j) (L (map collapse j))]
         [else j]))
 
 (define ast (collapse (remove "PlaceHolder" (remove 'location j))))
@@ -63,7 +62,9 @@
    (define patterns (list (find 'VarName (find 'VarPat clauses))
                           (map second (find 'HsIntegral (find 'NPat clauses)))))
    (define results (find 'GRHS ast))
-   }#;(map list fs patterns results)
+   }
+
+#;(map list fs patterns results)
 
 (define (unparse . ast) (apply ~a (add-between (flatten ast) " ")))
 #;(unparse f ':: (add-between f-type '->))
@@ -96,6 +97,35 @@
 (sort (remove-duplicates (filter string? leaves)) string<?)
 (check-pred empty? (filter (not/c (or/c symbol? string?)) leaves))
 
+; Investigating linear parts of the tree, e.g. b-c-d in:
+;      a
+;     / \
+;    b   Δ
+;    |
+;    c
+;    |
+;    d
+;    Δ
+;
+(define (line t)
+  (match t
+    [`(,tag (,_ . ,_)) (list* tag (line (second t)))]
+    [`(,tag . ,_) (list tag)]
+    [else '()]))
+; Not maximal right now.
+(define (lines t)
+  (match t
+    [`(,tag . ,children)
+     (list* (line t) (append-map lines children))]
+    [else '()]))
+;
+(define linear-contexts
+  (group-by identity (sort #:key length (filter (λ (l) (> (length l) 1))
+                                                (lines ast))
+                           <)))
+(map (λ (cs) (list (first cs) (length cs)))
+     linear-contexts)
+
 (require "tree-query.rkt")
 
 ; Compound tags.
@@ -104,8 +134,9 @@
 (filter (not/c (or/c symbol? list?)) (tags ast))
 
 ; To use with ‘index’.
-(length (filter (λ (l) (> (length l) 1))
-                (group-by identity (filter list? (parts ast)))))
+(define repeats (map first (filter (λ (l) (> (length l) 1))
+                                   (group-by identity (filter list? (parts ast))))))
+(define an-index (map cons repeats (range (length repeats))))
 
 (define symbol string->symbol)
 (define (from-singleton l) (match l [`(,e) e]))
@@ -113,47 +144,53 @@
 (define find1 (compose from-singleton find))
 
 (prune 7 ast)
-(define module (filter (not/c (curry equal? "Nothing"))
-                       (untag (find1 'HsModule ast))))
-(define top-kinds '(TyClD SigD ValD))
-(define top (find top-kinds ast))
-(check-equal? (map first module) (map first top))
+(prune 8 ast)
+(prune 8 (index ast an-index))
 
-(define top-kinds′ (group-by identity (prune 4 top)))
-(check-equal? (length top-kinds) (length top-kinds′))
-(check-equal? (map first top-kinds′)
-              '((TyClD (SynDecl #;DataDecl ((⋯) (⋯) "Prefix" (⋯))))
-                (SigD (TypeSig ((⋯) (⋯))))
-                (ValD (FunBind ((⋯) (⋯) "WpHole")))))
 
-(define signatures (find 'SigD ast))
-(share signatures)
-(share (find 'ValD ast))
-(share (find 'TyClD ast))
+#;{
+   (define module (filter (not/c (curry equal? "Nothing"))
+                          (untag (find1 'HsModule ast))))
+   (define top-kinds '(TyClD SigD ValD))
+   (define top (find top-kinds ast))
+   (check-equal? (map first module) (map first top))
 
-(define (SigD t)
-  (match t
-    [`(SigD . ,t) (list (symbol (untag (find1 'VarName t)))
-                        (FunTy (find1 '(HsFunTy HsAppsTy) t)))]))
+   (define top-kinds′ (group-by identity (prune 4 top)))
+   (check-equal? (length top-kinds) (length top-kinds′))
+   (check-equal? (map first top-kinds′)
+                 '((TyClD (SynDecl #;DataDecl ((⋯) (⋯) "Prefix" (⋯))))
+                   (SigD (TypeSig ((⋯) (⋯))))
+                   (ValD (FunBind ((⋯) (⋯) "WpHole")))))
 
-(define (thin key/s t)
-  (define t′ (find key/s t))
-  (if (empty? t′)
-      t
-      (map (match-lambda [`(,k . ,t) `(,k . ,(thin key/s t))])
-           t′)))
+   (define signatures (find 'SigD ast))
+   (share signatures)
+   (share (find 'ValD ast))
+   (share (find 'TyClD ast))
 
-(thin '(TvName TcClsName HsTupleTy TyClD HsFunTy HsAppsTy) ast)
+   (define (SigD t)
+     (match t
+       [`(SigD . ,t) (list (symbol (untag (find1 'VarName t)))
+                           (FunTy (find1 '(HsFunTy HsAppsTy) t)))]))
 
-(define (FunTy t)
-  (match t
-    [`(HsFunTy (,a ,b)) `(,(FunTy a) → ,(FunTy b))]
-    [`(HsAppsTy . ,t) (match (find 'HsFunTy t)
-                        [`(,ft) (FunTy ft)]
-                        [_ (match (find '(TvName TcClsName HsTupleTy) t)
-                             [`((HsTupleTy ,t)) `(tuple ,(FunTy t))]
-                             [`((,_ ,(app symbol id))) id]
-                             [`((TcClsName ,(app symbol id-c)) (,_ #;TvName ,(app symbol id-a)))
-                              `(,id-c ,id-a)])])]))
+   (define (thin key/s t)
+     (define t′ (find key/s t))
+     (if (empty? t′)
+         t
+         (map (match-lambda [`(,k . ,t) `(,k . ,(thin key/s t))])
+              t′)))
 
-(map SigD signatures)
+   (thin '(TvName TcClsName HsTupleTy TyClD HsFunTy HsAppsTy) ast)
+
+   (define (FunTy t)
+     (match t
+       [`(HsFunTy (,a ,b)) `(,(FunTy a) → ,(FunTy b))]
+       [`(HsAppsTy . ,t) (match (find 'HsFunTy t)
+                           [`(,ft) (FunTy ft)]
+                           [_ (match (find '(TvName TcClsName HsTupleTy) t)
+                                [`((HsTupleTy ,t)) `(tuple ,(FunTy t))]
+                                [`((,_ ,(app symbol id))) id]
+                                [`((TcClsName ,(app symbol id-c)) (,_ #;TvName ,(app symbol id-a)))
+                                 `(,id-c ,id-a)])])]))
+
+   (map SigD signatures)
+   }
