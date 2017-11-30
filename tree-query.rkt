@@ -2,10 +2,10 @@
 
 #| Two common ways to view a list as a tree:
 
-     1. Lists are internal nodes with no data, containing their children,
-         with data/labels only at the non-list leaves.
-     2. Lists are nodes with data and children, with the data as the first element
-         and the children as the rest of the element.
+ 1. Lists are internal nodes with no data, containing their children,
+     with data/labels only at the non-list leaves.
+ 2. Lists are nodes with data and children, with the data as the first element
+     and the children as the rest of the element.
 
  Some wrinkles:
    • empty lists (1, 2)
