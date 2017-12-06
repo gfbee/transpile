@@ -1,26 +1,26 @@
 #lang racket
 
-(provide (rename-out [=? =]))
+(provide (rename-out [=? =] [>? >] [<? <] [<=? <=] [>=? >=]
+                     [equal?? equal?]))
 
-#| Overloaded ‘=’.
+#| Overloaded numeric comparisons, producing unary predicates.
 
- To make unary predicates that check if a particular function of a value equals a particular number.
+ Curried for unary case: (<rel> c) ≡ (curry <rel> c).
 
- If f is a function, then (=? f c) makes a unary predicate that checks if f of a value is equal to c.
-  It's meant to be used with HOFs, but here is the algebraic rule [which shows that immediate use
-  is no shorter, and with a possibly confusing order of operations]:
+ For a function f: (<rel> f c) is a unary predicate that checks if f of a value has the relation to c.
+   That's meant for use with HOFs, but here's the algebraic rule: ((<rel> f c) x) ≡ (<rel> (f x) c).
+   The rule demonstrates that immediate use is akward with potentially confusing order.
 
-    If f is a function, ((=? f c) x) ≡ (= (f x) c) ≡ (= c (f x)).
-    Otherwise (=? e ...) ≡ (= e ...).
+ Otherwise (<rel> x ...) ≡ (<rel> x ...).
 
  Potential generalizations, keeping in mind that overloading increases difficulty of debugging:
    • ((=? f c) x ...) ≡ (= (f x ...) c) - probably useful
    • for ‘equal?’ - probably useful
-   • curried (=? f) - could be useful
    • (=? f c c′ cs ...) - least useful |#
 
 ; Example.
 (module+ test (require rackunit)
+  
   ; Use overloaded ‘=’ to make a unary predicate checking if a list has length two.
   (check-true  ((=? length 2) '(anya buffy)))
   (check-false ((=? length 2) '(anya buffy willow)))
@@ -30,14 +30,23 @@
   ;
   (check-equal? (filter (=? length 2) '((1) (1 2) (1 2 3))) '((1 2)))
   ;
-  (check-equal? (filter (=? length 2)
-                        '((1) (1 2) (1 2 3)))
-                (filter (λ (l) (= (length l) 2))
-                        '((1) (1 2) (1 2 3)))))
+  (check-equal? (filter (=? length 2)            '((1) (1 2) (1 2 3)))
+                (filter (λ (l) (= (length l) 2)) '((1) (1 2) (1 2 3))))
 
-(define =? (case-lambda [(f/v a) (if (procedure? f/v) (λ (b) (= (f/v b) a)) (= f/v a))]
-                        [args (apply = args)]))
+  ; Curried.
+  (check-equal? (filter (<? 1) '(3 1 4 1 5 9)) '(3 4 5 9)))
 
+(define (overload p)
+  (case-lambda [(f/v a) (if (procedure? f/v) (λ (b) (p (f/v b) a)) (p f/v a))]
+               [(v) (λ (v′) (p v v′))]
+               [args (apply p args)]))
+
+(define =?  (overload =))
+(define <?  (overload <))
+(define <=? (overload <=))
+(define >?  (overload >))
+(define >=? (overload >=))
+(define equal?? (overload equal?))
 
 ; Reference for doing such things based on static form.
 #;(require (for-syntax syntax/parse)
@@ -50,3 +59,8 @@
                                  (λ (b) (racket:= (f b) a′))
                                  (racket:= f′ a′)))]
       [(_ . sub-forms) #'(racket:= . sub-forms)]))
+
+; To come:
+;   unequal? ≠
+;   nor/c
+;   ∘
