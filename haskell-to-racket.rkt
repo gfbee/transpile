@@ -32,7 +32,7 @@
 (module JST racket/base (provide ast)
   (require json (only-in racket/dict in-dict) racket/list racket/function)
   (define p (open-input-file "Stack.json" #;"MaybeInt.json"))
-  (read-line p)
+  (void (read-line p)) #;"in treesForTargets"
   (define j (read-json p))
   (define (remove key j)
     (cond [(hash? j) (list (for/hash ([(k v) (in-dict j)] #:unless (equal? k key))
@@ -56,6 +56,28 @@
 ; Used at the top level, this prints each expression e as '(★ e), followed by the value of e.
 (define-syntax-rule (show e ...) (begin (begin '(★ e) e) ...))
 
+#;(interact id
+            expr
+            ...)
+;
+; Interactively: repeatedly do (show expr ...), where the expressions [can] depend on id,
+;  but asking the user each time for the value of id.
+;
+(require (for-syntax syntax/parse) racket/pretty)
+(define-syntax interact
+  (syntax-parser [(_ an-id:id e:expr ...+)
+                  #'(local [(define out (curryr println (current-output-port) 1))]
+                      (printf "★ Delayed ★\n")
+                      (for-each out '(e ...))
+                      (printf "★ Enter a value for ~a, or enter the word end ★\n" 'an-id)
+                      (let loop ()
+                        (flush-output)
+                        (define an-id (read))
+                        (unless (equal? an-id 'end)
+                          (for-each pretty-print (list e ...))
+                          (loop))))]))
+
+
 (require (only-in "equivalence.rkt" group))
 ; Group (list e ...) by (key1 e), group within those by (key2 e), etc.
 #;(group key1 key2 ... a-list)
@@ -68,30 +90,83 @@
 #;((= depth 1) ast) ; Does depth of ast = 1?
 #;(show (remove-duplicates (filter (= depth 2) (parts ast)))) ; All depth 2 parts of the ast.
 
+(require (only-in "point-free.rkt" ∘)) ; Common name for ‘compose’.
 
-#| --- |#
-
-(define (sift p selector relation) (filter (compose p selector) relation))
+#| Filtering |#
+(define (sift p selector relation) (filter (∘ p selector) relation))
 
 
 #| General Tree Helpers |#
 (require "tree-query.rkt" sxml)
 
 
-#| Statistics |#
+#| Tree Measurements
+ size   : (any/c . -> . natural?)
+ depth  : (any/c . -> . natural?)
+ width  : (natural? any/c . -> . natural?)
+ widths : (any/c . -> . (listof natural?)) |#
 
-(define (width n t) (- (length (flatten (prune (add1 n) ast)))
-                       (length (flatten (prune       n  ast)))))
-(define widths (map (curryr width ast) (range (depth ast))))
-      
-(show (length (flatten ast))
-      (depth ast)
-      widths)
+(define size (∘ length flatten))
+(require (only-in "tree-query.rkt" depth))
+(define (width n t) (- (size (prune (add1 n) ast))
+                       (size (prune       n  ast))))
+(define (widths t) (map (curryr width t) (range (depth t))))
+
+; EXAMPLE:
+#;(show (size ast) (depth ast)
+        (define ws (widths ast)) ws (sort ws <) (apply max ws))
 
 
-#| Shape |#
+#| Tree Shape |#
 
+; draw-widths : (any/c . -> . image?)
+(define (draw-widths t)
+  (local-require (only-in 2htdp/image rectangle))
+  (apply above (map (curryr rectangle 1 "solid" "black") (widths t))))
+(require (only-in 2htdp/image scale scale/xy))
+
+; EXAMPLE:
+#;(show (define dws (draw-widths ast)) dws (scale/xy 1 3 dws) (scale 3 dws))
+
+; structure : (any/c . -> . any/c)
+; This is where the big area of pretty-printing starts to come in.
+; Since it's about structure at this point, shrinkable output in the Interactions
+;  would be a good first step.
 (define (structure t) (if (list? t) (map structure t) '•))
+
+; EXAMPLE:
+(interact d (prune d ast) (prune d (structure ast)))
+
+; Pretty-printing.
+(show (pretty-print-columns (* 3 (depth ast)) #;'infinity)
+      #;(pretty-print (structure ast))
+      ; pretty-print-depth is similar to my ‘prune’
+      (pretty-print-depth (quotient (depth ast) 4))
+      (pretty-print (structure ast))
+      (pretty-print ast))
+;
+; ToDo: newline for arity > 2
+;       arity indicators
+
+; ToDo: document filter-map, consider multi-list filters.
+
+; Explore the arities.
+(require (only-in "equivalence.rkt" counts)
+         (only-in "point-free.rkt" ∧ ¬ ∨))
+(show (define asts (parts ast))
+      (define arity (∧ list? (∘ sub1 length)))
+      (define arities (sort (filter-map arity asts) <))
+      #;(for/list ([a 4]) (count (= a) arities))
+      (filter (equal? arity 0) asts)
+      (prune 4 (filter (equal? arity (apply max arities)) asts))
+      #;(filter (< 2) arities)
+      #;(samples->hash arities) ; doesn't preserve ordering
+      (counts arities)
+      (prune 4 (filter (equal? arity 5) asts))
+      #;(group length second (prune 3 (filter (∧ list? (> length 2)) asts))))
+
+
+#| --- |#
 
 (define (chop p a-list)
   (if (empty? a-list)
@@ -107,16 +182,8 @@
                   (chop symbol? (map s t)))
       #;'• t))
 
-(require (only-in 2htdp/image
-                  square
-                  circle
-                  beside
-                  image-width
-                  beside/align
-                  above/align
-                  rectangle
-                  above
-                  scale))
+(require (only-in 2htdp/image square circle beside image-width beside/align above/align
+                  rectangle above scale))
 (define (draw t)
   (define • (circle 1 "solid" "black"))
   (define ∘ (square 2 "solid" "transparent"))
@@ -128,8 +195,8 @@
         [else •]))
 (show #;(structure ast)
       #;(s ast)
-      (scale 1/2 (draw ast))
-      (scale 3 (apply above (map (curryr rectangle 1 "solid" "black") widths))))
+      #;(scale 1/2 (draw ast)))
+
 
 #| --- |#
 
@@ -157,26 +224,20 @@
              (group first (filter list? (parts a)))
              (prune 2 (group first (filter list? (parts a))))
              (prune 3 (group first (filter list? (parts a))))
-
              (prune 3 (group first second (filter list? (parts a))))
-
              (prune 4 (group first second (filter list? (parts a))))
-
              (prune 4 (group first second third (filter list? (parts a))))
-
              (prune 4 (group first second third (filter (and/c list? (>= length 3)) (parts a))))
-
              (prune 5 (group first second third (filter (and/c list? (>= length 3)) (parts a))))
-
-             (filter (and/c list? (>= length 2) (compose symbol? second)) (parts a))
-
-             (map (curryr takef symbol?) (filter (and/c list? (>= length 2) (compose symbol? second)) (parts a)))
-
-             (group first second (map (curryr takef symbol?) (filter (and/c list? (>= length 2) (compose symbol? second)) (parts a))))
-
-             (group identity (map (curryr takef symbol?) (filter (and/c list? (>= length 2) (compose symbol? second)) (parts a))))
-
-             }
+             (filter (and/c list? (>= length 2) (∘ symbol? second)) (parts a))
+             (map (curryr takef symbol?) (filter (and/c list? (>= length 2) (∘ symbol? second))
+                                                 (parts a)))
+             (group first second (map (curryr takef symbol?)
+                                      (filter (and/c list? (>= length 2) (∘ symbol? second))
+                                              (parts a))))
+             (group identity (map (curryr takef symbol?)
+                                  (filter (and/c list? (>= length 2) (∘ symbol? second))
+                                          (parts a))))}
 
 
 #| Bottom-up |#
@@ -253,7 +314,7 @@
 (define symbol string->symbol)
 (define (from-singleton l) (match l [`(,e) e]))
 (define (untag pair) (match pair [`(,_ ,e) e]))
-(define find1 (compose from-singleton find))
+(define find1 (∘ from-singleton find))
 
 #;(prune 7 ast)
 #;(prune 8 ast)

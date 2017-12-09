@@ -3,8 +3,14 @@
 #| Lists as bags, sets, equivalence classes. |#
 
 (provide
+
+ ; counts : (sequence? . -> . (listof (cons/c any/c natural?)))
+ ; See also samples->hash, but counts is ordered by first occurrence of element.
+ counts
+ 
  ; same API as ‘check-duplicates’ and ‘remove-duplicates’
  group-duplicates
+ 
  ; primary, secondary, ... keys
  ; group : (any/c . -> . any/c) ... list? -> list?
  group)
@@ -20,6 +26,22 @@
 
 (define (group-duplicates a-list [same? equal?] #:key [extract-key (λ (v) v)])
   (group-by extract-key a-list same?))
+
+; Since filtering doesn't change order and is a subset of the elements,
+;  it's natural to use it to count the number of elements with a property.
+;
+; (count proc lst ...+) → exact-nonnegative-integer?
+;   proc : procedure?
+;   lst : list?
+; For one list, (count p l) ≡ (length (filter p l)).
+; For more than one list, it uses filter-map.
+;
+; ToDo: counts taking a predicate, unified with grouping, etc.
+
+(define (counts seq)
+  (local-require (only-in math/statistics count-samples #;samples->hash))
+  (define-values (es cs) (count-samples seq))
+  (map cons es cs))
 
 #| Is it set-like?    check-duplicates: first duplicate, or #false.
    To set-like list. remove-duplicates: keep only first occurrences.

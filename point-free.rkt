@@ -1,7 +1,9 @@
 #lang racket
 
 (provide (rename-out [=? =] [>? >] [<? <] [<=? <=] [>=? >=]
-                     [equal?? equal?]))
+                     [equal?? equal?]
+                     [compose ∘]
+                     [not/c ¬] [and/c ∧] [or/c ∨]))
 
 #| Overloaded numeric comparisons, producing unary predicates.
 
