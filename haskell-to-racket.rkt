@@ -113,8 +113,8 @@
 (define (widths t) (map (curryr width t) (range (depth t))))
 
 ; EXAMPLE:
-#;(show (size ast) (depth ast)
-        (define ws (widths ast)) ws (sort ws <) (apply max ws))
+(show (size ast) (depth ast)
+      (define ws (widths ast)) ws (sort ws <) (apply max ws))
 
 
 #| Tree Shape |#
@@ -126,7 +126,7 @@
 (require (only-in 2htdp/image scale scale/xy))
 
 ; EXAMPLE:
-#;(show (define dws (draw-widths ast)) dws (scale/xy 1 3 dws) (scale 3 dws))
+(show (define dws (draw-widths ast)) dws (scale/xy 1 3 dws) (scale 3 dws))
 
 ; structure : (any/c . -> . any/c)
 ; This is where the big area of pretty-printing starts to come in.
@@ -162,8 +162,8 @@
       #;(filter (< 2) arities)
       #;(samples->hash arities) ; doesn't preserve ordering
       (counts arities)
-      (prune 4 (filter (equal? arity 5) asts))
-      #;(group length second (prune 3 (filter (∧ list? (> length 2)) asts))))
+      (prune 4 (filter (equal? arity 5) asts)))
+(interact d (prune d (group second third (filter (∧ list? (> length 2)) asts))))
 
 
 #| --- |#
