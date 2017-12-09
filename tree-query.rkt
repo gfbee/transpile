@@ -104,6 +104,9 @@
       (add1 (apply max 0 (map depth t)))
       0))
 
+#;(check-equal? (tags ast) (map first (filter list? asts)))
+#;(check-equal? (tags ast) (map first (filter list? ((sxpath '(//)) ast))))
+
 (define (tags t)
   (match t
     [`(,label . ,t) `(,label . ,(append-map tags t))]
