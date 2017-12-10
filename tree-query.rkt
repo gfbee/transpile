@@ -21,10 +21,38 @@
  Top n levels: ‘prune’.
  Top shared between trees: ‘share’. |#
 
-(provide tags parts
-         depth prune share
+(provide size height width widths
+         tags parts
+         prune share
          index)
 
+; Records intent.
+; Any value does work wherever this is used: non-lists are simply treated atomically.
+(require racket/contract)
+(define tree/c any/c)
+
+#| Measurement |#
+
+(define size/c            (tree/c . -> . natural?))
+(define height/c          (tree/c . -> . natural?))
+(define width/c  (natural? tree/c . -> . natural?))
+(define widths/c (tree/c . -> . (listof natural?)))
+
+(module* contracted #false
+  (provide (contract-out [size size/c]
+                         [height height/c]
+                         [width width/c]
+                         [widths widths/c])))
+
+(require (only-in "point-free.rkt" ∘))
+(define size (∘ length flatten))
+(define (height t) (if (list? t) (add1 (apply max 0 (map height t))) 0))
+(define (width n t) (- (size (prune (add1 n) t))
+                       (size (prune       n  t))))
+(define (widths t) (map (curryr width t) (range (height t))))
+
+
+#| --- |#
 
 (require racket/trace) ; See usage of (trace <id>) later in the code.
 
@@ -41,8 +69,8 @@
                                                     '(⋯)
                                                     (map (curry prune (sub1 n)) t))
                                                 t))))
-  (check-equal? (depth tree-0) 5)
-  (check-equal? (map (curryr prune tree-0) (range (add1 (depth tree-0))))
+  (check-equal? (height tree-0) 5)
+  (check-equal? (map (curryr prune tree-0) (range (add1 (height tree-0))))
                 '((⋯)
                   (define (⋯)
                     (⋯))
@@ -98,11 +126,6 @@
           '(⋯)
           (map (curry prune (sub1 n)) tree))
       tree))
-
-(define (depth t)
-  (if (list? t)
-      (add1 (apply max 0 (map depth t)))
-      0))
 
 #;(check-equal? (tags ast) (map first (filter list? asts)))
 #;(check-equal? (tags ast) (map first (filter list? ((sxpath '(//)) ast))))

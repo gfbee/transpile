@@ -51,70 +51,35 @@
 
 #| Very General Helpers |#
 
-; Show an expression and its result.
-; Used at the top level, this prints each expression e as (★ e), followed by the value of e.
-(define-syntax-rule (show e ...) (begin (begin (println '(★ e) (current-output-port) 1) e) ...))
+; Usages below, and their behaviour in the Interactions, are shortest explanation.
+; Otherwise: see the comments in "interact.rkt".
+(require (only-in "interact.rkt" show interact))
 
-#;(interact id
-            expr
-            ...)
-;
-; Interactively: repeatedly do (show expr ...), where the expressions [can] depend on id,
-;  but asking the user each time for the value of id.
-;
-(require (for-syntax syntax/parse) racket/pretty)
-(define-syntax interact
-  (syntax-parser [(_ an-id:id e:expr ...+)
-                  #'(local [(define out (curryr println (current-output-port) 1))]
-                      (printf "★ Delayed ★\n")
-                      (for-each out '(e ...))
-                      (printf "★ Enter a value for ~a, or enter the word end ★\n" 'an-id)
-                      (let loop ()
-                        (flush-output)
-                        (define an-id (read))
-                        (unless (≡ an-id 'end)
-                          (for-each pretty-print (list e ...))
-                          (loop))))]))
-
-
-(require (only-in "equivalence.rkt" group))
 ; Group (list e ...) by (key1 e), group within those by (key2 e), etc.
 #;(group key1 key2 ... a-list)
+(require (only-in "equivalence.rkt" group))
 
-(require (only-in "point-free.rkt" = > < ≥ ≤ ≡))
-; Overloaded:
-;   • unary use produces unary version of the binary version, with first argument fixed
-;   • binary use, with first argument a function f, produces unary version of the binary version,
-;      that calls f and compares with the second argument
-#;((= depth 1) ast) ; Does depth of ast = 1?
-#;(show (remove-duplicates (filter (= depth 2) asts))) ; All depth 2 parts of the ast.
+(require (only-in "point-free.rkt" = > < ≥ >= ≤ <= ≡ equal?))
+; Overloaded, and symbolic aliases.
+; Unary use produces unary version of the binary version, with first argument fixed.
+; Binary use, with first argument a function f, produces unary version of the bianary version,
+;  that calls f and compares with the second argument
+#;((= height 1) ast) ; Does height of ast = 1?
+#;(show (remove-duplicates (filter (= height 2) asts))) ; All height 2 parts of the ast.
 
 (require (only-in "point-free.rkt" ∘)) ; Common name for ‘compose’.
 
-#| Filtering |#
-(define (sift p selector relation) (filter (∘ p selector) relation))
-
-
 #| General Tree Helpers |#
-(require "tree-query.rkt" sxml)
+(require (except-in "tree-query.rkt" size height width widths)
+         (only-in (submod "tree-query.rkt" contracted) size height width widths)
+         sxml)
 
-
-#| Tree Measurements
- size   : (any/c . -> . natural?)
- depth  : (any/c . -> . natural?)
- width  : (natural? any/c . -> . natural?)
- widths : (any/c . -> . (listof natural?)) |#
-
-(define size (∘ length flatten))
-(require (only-in "tree-query.rkt" depth))
-(define (width n t) (- (size (prune (add1 n) ast))
-                       (size (prune       n  ast))))
-(define (widths t) (map (curryr width t) (range (depth t))))
-
-; EXAMPLE:
-(show (size ast) (depth ast)
-      (define ws (widths ast)) ws (sort ws <) (apply max ws))
-
+#| Tree Measurements |#
+(show (size ast) (height ast)
+      (define ws (widths ast))
+      ws
+      (sort #:key car (counts ws) <)
+      (apply max ws))
 
 #| Tree Shape |#
 
@@ -127,6 +92,19 @@
 ; EXAMPLE:
 (show (define dws (draw-widths ast)) dws (scale/xy 1 3 dws) (scale 3 dws))
 
+(define (image t)
+  (define • (circle 1 "solid" "black"))
+  (define ∘ (square 2 "solid" "transparent"))
+  (define i (square 0 "solid" "transparent"))
+  (cond [(list? t)
+         (define kids (apply beside/align "top" i i (add-between (map image (rest t)) ∘)))
+         (above •
+                (rectangle (max 2 (- (image-width kids) 4)) 1/2 "solid" "black")
+                kids)]
+        [else •]))
+
+(interact d (scale 3 (image (prune d ast))))
+
 ; structure : (any/c . -> . any/c)
 ; This is where the big area of pretty-printing starts to come in.
 ; Since it's about structure at this point, shrinkable output in the Interactions
@@ -137,10 +115,10 @@
 (interact d (prune d ast) (prune d (structure ast)))
 
 ; Pretty-printing.
-(show (parameterize ([pretty-print-columns (* 3 (depth ast)) #;'infinity])
+(show (parameterize ([pretty-print-columns (* 3 (height ast)) #;'infinity])
         #;(pretty-print (structure ast))
         ; pretty-print-depth is similar to my ‘prune’
-        (parameterize ([pretty-print-depth (quotient (depth ast) 4)])
+        (parameterize ([pretty-print-depth (quotient (height ast) 4)])
           (pretty-print (structure ast))
           (pretty-print ast))))
 ;
@@ -151,7 +129,7 @@
 
 ; Explore the arities.
 (require (only-in "equivalence.rkt" counts)
-         (only-in "point-free.rkt" ∧ ¬ ∨))
+         (only-in "point-free.rkt" ¬ ∧ ∨))
 (show (define asts (parts ast))
       (define arity (∧ list? (∘ sub1 length)))
       (define arities (sort (filter-map arity asts) <))
@@ -164,27 +142,24 @@
       (prune 4 (filter (≡ arity 5) asts)))
 (interact d (prune d (group second third (filter (∧ list? (> length 2)) asts))))
 
-
 #| Bottom-up |#
 
 ; Interpreted unlabelled.
-;   depth = 0
+;   height = 0
 (show (define atoms (flatten ast))
-      (check-equal? atoms (filter (= depth 0) asts))
+      (check-equal? atoms (filter (= height 0) asts))
       ; It's only symbols and strings.
       (sort (remove-duplicates (filter symbol? atoms)) symbol<?)
       (sort (remove-duplicates (filter string? atoms)) string<?)
       (check-pred zero? (count (¬ (∨ symbol? string?)) atoms))
       #;(check-pred empty? (filter-not (∨ symbol? string?) leaves)))
 (interact c (filter (≥ cdr c) (counts atoms)))
-;  depth ≥ 1
-(interact d (group-by first (filter (= depth d) asts)))
-
+;  height ≥ 1
+(interact d (group-by first (filter (= height d) asts)))
 
 #| Tags/Labels |#
 (show (check-true (andmap symbol? (tags ast)))) ; All are symbols.
 (interact c (filter (≥ cdr c) (counts (tags ast))))
-
 
 #| --- |#
 
@@ -213,7 +188,6 @@
       #;(s ast)
       #;(scale 1/2 (draw ast)))
 
-
 #| --- |#
 
 ; No symbols as first kid.
@@ -227,7 +201,7 @@
                          [_ (map inline t)])
                        t))
 
-(show (define a (inline ast)) (depth (s a)))
+(show (define a (inline ast)) (height (s a)))
 (interact d (prune d a) (prune d (s a)))
 
 (show #;(length (remove-duplicates (filter symbol? (flatten (s a)))))
@@ -241,24 +215,24 @@
         (group first (filter list? shares))
         (filter (> length 1) (group first (filter list? shares))))
 
-#;{(depth a) (structure a) (length (parts a))
-             (group first (filter list? (parts a)))
-             (prune 2 (group first (filter list? (parts a))))
-             (prune 3 (group first (filter list? (parts a))))
-             (prune 3 (group first second (filter list? (parts a))))
-             (prune 4 (group first second (filter list? (parts a))))
-             (prune 4 (group first second third (filter list? (parts a))))
-             (prune 4 (group first second third (filter (∧ list? (≥ length 3)) (parts a))))
-             (prune 5 (group first second third (filter (∧ list? (≥ length 3)) (parts a))))
-             (filter (∧ list? (≥ length 2) (∘ symbol? second)) (parts a))
-             (map (curryr takef symbol?) (filter (∧ list? (≥ length 2) (∘ symbol? second))
-                                                 (parts a)))
-             (group first second (map (curryr takef symbol?)
-                                      (filter (∧ list? (≥ length 2) (∘ symbol? second))
-                                              (parts a))))
-             (group identity (map (curryr takef symbol?)
-                                  (filter (∧ list? (≥ length 2) (∘ symbol? second))
-                                          (parts a))))}
+#;{(height a) (structure a) (length (parts a))
+              (group first (filter list? (parts a)))
+              (prune 2 (group first (filter list? (parts a))))
+              (prune 3 (group first (filter list? (parts a))))
+              (prune 3 (group first second (filter list? (parts a))))
+              (prune 4 (group first second (filter list? (parts a))))
+              (prune 4 (group first second third (filter list? (parts a))))
+              (prune 4 (group first second third (filter (∧ list? (≥ length 3)) (parts a))))
+              (prune 5 (group first second third (filter (∧ list? (≥ length 3)) (parts a))))
+              (filter (∧ list? (≥ length 2) (∘ symbol? second)) (parts a))
+              (map (curryr takef symbol?) (filter (∧ list? (≥ length 2) (∘ symbol? second))
+                                                  (parts a)))
+              (group first second (map (curryr takef symbol?)
+                                       (filter (∧ list? (≥ length 2) (∘ symbol? second))
+                                               (parts a))))
+              (group identity (map (curryr takef symbol?)
+                                   (filter (∧ list? (≥ length 2) (∘ symbol? second))
+                                           (parts a))))}
 
 #| Repeated Parts |#
 (require (only-in math/statistics samples->hash))
@@ -266,12 +240,17 @@
 (define part×reps (hash-map (samples->hash (filter list? (parts ast′))) list))
 (define-values (part reps) (values first second))
 
-(define repeats (map part (sift (≤ 2) reps part×reps)))
+#;(define (sift p selector relation) (filter (∘ p selector) relation))
+(define repeats (map part (filter (≥ reps 2) part×reps)))
 (define an-index (map cons repeats (range (length repeats))))
 (define indexed-ast′ (index ast′ an-index))
 
 (show (size ast) (size (inline ast)) (size (s (inline ast))) (size indexed-ast′)
       (size an-index) (+ (size an-index) 261))
+(show (image ast)
+      (image (inline ast))
+      (image (s (inline ast)))
+      (image indexed-ast′))
 (interact d (prune d ast′) (prune d indexed-ast′))
 ; Repeats can become singles when all but one use is inside another repetition.
 (show (define singles (filter (= cdr 1) (counts (filter number? (flatten indexed-ast′)))))
@@ -294,7 +273,7 @@
       ((sxpath '(// (*or* TvName TcClsName))) ast))
 
 (show (group first second (prune 3 ((sxpath "//VarName/..") ast)))
-      (group first second (filter (= depth 3) asts)))
+      (group first second (filter (= height 3) asts)))
 
 
 #| --- |#
