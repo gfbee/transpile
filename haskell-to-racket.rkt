@@ -1,53 +1,25 @@
 #lang racket
+
 (require rackunit)
+
 ; Types
 ; =====
-; Integer
-; List T
-; Tuple T ...
-; T → T
-; C T ...
-;
-; type
-;   synonym
-; data
-;   new ADT
+; Integer, List T, Tuple T ..., T → T, C T ...
+; type: synonym
+; data: new ADT
 
 ; Identifier declaration
 ; ----------------------
-; id :: T
-;   usually id :: T → T
-
+; id :: T, usually id :: T → T
 
 ; (<expr> <expr>)
-;
 ; let <pat> = <expr>
 ;     ...
 ;     in <expr>
-;
 ; <literal>
-;
 
-; ghc-dump-tree --json MaybeInt.hs > MaybeInt.json
-(module JST racket/base (provide ast)
-  (require json (only-in racket/dict in-dict) racket/list racket/function)
-  (define p (open-input-file "Stack.json" #;"MaybeInt.json"))
-  (void (read-line p)) #;"in treesForTargets"
-  (define j (read-json p))
-  (define (remove key j)
-    (cond [(hash? j) (list (for/hash ([(k v) (in-dict j)] #:unless (equal? k key))
-                             (values k (remove key v))))]
-          [(list? j) (append-map (curry remove key) j)]
-          [(equal? j key) (list)]
-          [else (list j)]))
-  (define (collapse j)
-    (define (L result) (if (= (length result) 1) (first result) `(: . ,result)))
-    (cond [(hash? j) (L (for/list ([(k v) (in-dict j)]) (list k (collapse v))))]
-          [(list? j) (L (map collapse j))]
-          [else j]))
-  (define ast (collapse (remove "PlaceHolder" (remove 'location j)))))
-
-(require 'JST)
+(require (only-in "read-ast.rkt" read-ast))
+(define ast (read-ast "Stack.json"))
 
 #| Very General Helpers |#
 
@@ -83,21 +55,23 @@
 
 #| Tree Shape |#
 
+(require (only-in 2htdp/image scale scale/xy
+                  above rectangle))
+
 ; draw-widths : (any/c . -> . image?)
 (define (draw-widths t)
-  (local-require (only-in 2htdp/image rectangle))
   (apply above (map (curryr rectangle 1 "solid" "black") (widths t))))
-(require (only-in 2htdp/image scale scale/xy))
 
 ; EXAMPLE:
 (show (define dws (draw-widths ast)) dws (scale/xy 1 3 dws) (scale 3 dws))
 
 (define (image t)
+  (local-require (only-in 2htdp/image square circle beside/align image-width))
   (define • (circle 1 "solid" "black"))
   (define ∘ (square 2 "solid" "transparent"))
-  (define i (square 0 "solid" "transparent"))
+  (define blank (square 0 "solid" "transparent"))
   (cond [(list? t)
-         (define kids (apply beside/align "top" i i (add-between (map image (rest t)) ∘)))
+         (define kids (apply beside/align "top" blank blank (add-between (map image (rest t)) ∘)))
          (above •
                 (rectangle (max 2 (- (image-width kids) 4)) 1/2 "solid" "black")
                 kids)]
@@ -165,31 +139,6 @@
 
 (require (only-in "order.rkt" chop))
 
-(define (s t)
-  (if (list? t)
-      (append-map (λ (segment) (if (symbol? (first segment))
-                                   (list (string->symbol (apply ~a segment)))
-                                   segment))
-                  (chop symbol? (map s t)))
-      #;'• t))
-
-(require (only-in 2htdp/image square circle beside image-width beside/align above/align
-                  rectangle above scale))
-(define (draw t)
-  (define • (circle 1 "solid" "black"))
-  (define ∘ (square 2 "solid" "transparent"))
-  (cond [(list? t) (define kids (apply beside/align "top"
-                                       ∘ (append (map draw t) (list ∘))))
-                   (beside ∘ (above/align "left"
-                                          (rectangle (- (image-width kids) 2) 1 "solid" "black")
-                                          kids) ∘)]
-        [else •]))
-(show #;(structure ast)
-      #;(s ast)
-      #;(scale 1/2 (draw ast)))
-
-#| --- |#
-
 ; No symbols as first kid.
 (show #;(sift symbol? second (filter (∧ list? (≥ length 2)) asts))
       (count (∧ list? (≥ length 2) (∘ symbol? second)) asts))
@@ -200,6 +149,21 @@
                          [`(,tag ,(? list? t′)) `(,tag . ,(inline t′))]
                          [_ (map inline t)])
                        t))
+
+(define internals (filter list? (parts (inline ast))))
+(require (only-in data/order datum-order order-<?))
+(show "After Inlining Linear Chains"
+      (define ≪ (order-<? datum-order))
+      (sort (counts (prune 2 internals)) ≪)
+      (counts (sort (map (curryr takef symbol?) internals) ≪)))
+
+(define (s t)
+  (if (list? t)
+      (append-map (λ (segment) (if (symbol? (first segment))
+                                   (list (string->symbol (apply ~a segment)))
+                                   segment))
+                  (chop symbol? (map s t)))
+      #;'• t))
 
 (show (define a (inline ast)) (height (s a)))
 (interact d (prune d a) (prune d (s a)))
@@ -264,16 +228,16 @@
       (take (prune 2 asts) 10)
       (take (prune 2 ((sxpath '(//)) ast)) 10)
       (andmap string? (filter (¬ list?) ((sxpath '(//)) ast)))
-      ((sxpath '(// VarName)) ast)
+      (counts ((sxpath '(// VarName)) ast))
       (prune 4 ((sxpath '(// TyClD)) ast))
       (prune 3 ((sxpath '(// TyClD SynDecl)) ast))
       (≡ ((sxpath '(// TyClD SynDecl)) ast)
          ((sxpath '(// TyClD / SynDecl)) ast))
-      ((sxpath '(// SigD // VarName)) ast)
-      ((sxpath '(// (*or* TvName TcClsName))) ast))
+      (counts ((sxpath '(// SigD // VarName)) ast))
+      (counts ((sxpath '(// (*or* TvName TcClsName))) ast)))
 
-(show (group first second (prune 3 ((sxpath "//VarName/..") ast)))
-      (group first second (filter (= height 3) asts)))
+(show (group caar cadar (counts (prune 3 ((sxpath "//VarName/..") ast))))
+      (group caar cadar (counts (filter (= height 3) asts))))
 
 
 #| --- |#
