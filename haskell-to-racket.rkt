@@ -49,12 +49,11 @@
 
 (require 'JST)
 
-
 #| Very General Helpers |#
 
 ; Show an expression and its result.
-; Used at the top level, this prints each expression e as '(★ e), followed by the value of e.
-(define-syntax-rule (show e ...) (begin (begin '(★ e) e) ...))
+; Used at the top level, this prints each expression e as (★ e), followed by the value of e.
+(define-syntax-rule (show e ...) (begin (begin (println '(★ e) (current-output-port) 1) e) ...))
 
 #;(interact id
             expr
@@ -73,7 +72,7 @@
                       (let loop ()
                         (flush-output)
                         (define an-id (read))
-                        (unless (equal? an-id 'end)
+                        (unless (≡ an-id 'end)
                           (for-each pretty-print (list e ...))
                           (loop))))]))
 
@@ -82,13 +81,13 @@
 ; Group (list e ...) by (key1 e), group within those by (key2 e), etc.
 #;(group key1 key2 ... a-list)
 
-(require (only-in "point-free.rkt" = > < >= <= equal?))
+(require (only-in "point-free.rkt" = > < ≥ ≤ ≡))
 ; Overloaded:
 ;   • unary use produces unary version of the binary version, with first argument fixed
 ;   • binary use, with first argument a function f, produces unary version of the binary version,
 ;      that calls f and compares with the second argument
 #;((= depth 1) ast) ; Does depth of ast = 1?
-#;(show (remove-duplicates (filter (= depth 2) (parts ast)))) ; All depth 2 parts of the ast.
+#;(show (remove-duplicates (filter (= depth 2) asts))) ; All depth 2 parts of the ast.
 
 (require (only-in "point-free.rkt" ∘)) ; Common name for ‘compose’.
 
@@ -138,12 +137,12 @@
 (interact d (prune d ast) (prune d (structure ast)))
 
 ; Pretty-printing.
-(show (pretty-print-columns (* 3 (depth ast)) #;'infinity)
-      #;(pretty-print (structure ast))
-      ; pretty-print-depth is similar to my ‘prune’
-      (pretty-print-depth (quotient (depth ast) 4))
-      (pretty-print (structure ast))
-      (pretty-print ast))
+(show (parameterize ([pretty-print-columns (* 3 (depth ast)) #;'infinity])
+        #;(pretty-print (structure ast))
+        ; pretty-print-depth is similar to my ‘prune’
+        (parameterize ([pretty-print-depth (quotient (depth ast) 4)])
+          (pretty-print (structure ast))
+          (pretty-print ast))))
 ;
 ; ToDo: newline for arity > 2
 ;       arity indicators
@@ -157,22 +156,39 @@
       (define arity (∧ list? (∘ sub1 length)))
       (define arities (sort (filter-map arity asts) <))
       #;(for/list ([a 4]) (count (= a) arities))
-      (filter (equal? arity 0) asts)
-      (prune 4 (filter (equal? arity (apply max arities)) asts))
+      (filter (≡ arity 0) asts)
+      (prune 4 (filter (≡ arity (apply max arities)) asts))
       #;(filter (< 2) arities)
       #;(samples->hash arities) ; doesn't preserve ordering
       (counts arities)
-      (prune 4 (filter (equal? arity 5) asts)))
+      (prune 4 (filter (≡ arity 5) asts)))
 (interact d (prune d (group second third (filter (∧ list? (> length 2)) asts))))
+
+
+#| Bottom-up |#
+
+; Interpreted unlabelled.
+;   depth = 0
+(show (define atoms (flatten ast))
+      (check-equal? atoms (filter (= depth 0) asts))
+      ; It's only symbols and strings.
+      (sort (remove-duplicates (filter symbol? atoms)) symbol<?)
+      (sort (remove-duplicates (filter string? atoms)) string<?)
+      (check-pred zero? (count (¬ (∨ symbol? string?)) atoms))
+      #;(check-pred empty? (filter-not (∨ symbol? string?) leaves)))
+(interact c (filter (≥ cdr c) (counts atoms)))
+;  depth ≥ 1
+(interact d (group-by first (filter (= depth d) asts)))
+
+
+#| Tags/Labels |#
+(show (check-true (andmap symbol? (tags ast)))) ; All are symbols.
+(interact c (filter (≥ cdr c) (counts (tags ast))))
 
 
 #| --- |#
 
-(define (chop p a-list)
-  (if (empty? a-list)
-      '()
-      (let ([ps (takef a-list p)])
-        (if (empty? ps) (chop (not/c p) a-list) (list* ps (chop (not/c p) (dropf a-list p)))))))
+(require (only-in "order.rkt" chop))
 
 (define (s t)
   (if (list? t)
@@ -201,7 +217,8 @@
 #| --- |#
 
 ; No symbols as first kid.
-(show (sift symbol? second (filter (and/c list? (>= length 2)) (parts ast))))
+(show #;(sift symbol? second (filter (∧ list? (≥ length 2)) asts))
+      (count (∧ list? (≥ length 2) (∘ symbol? second)) asts))
 
 ; Flatten unary chains of tags into initial segment of tags.
 (define (inline t) (if (list? t)
@@ -210,64 +227,74 @@
                          [_ (map inline t)])
                        t))
 
-(show (define a (inline ast))
-      (s a)
-      (depth (s a))
-      (length (remove-duplicates (filter symbol? (flatten (s a)))))
-      (define shares (filter (λ (st) (member '★ (flatten st)))
-                             (map share
-                                  (group first (filter (and/c list? (>= length 2)) (parts (s a)))))))
-      (group first (filter list? shares))
-      (filter (> length 1) (group first (filter list? shares))))
+(show (define a (inline ast)) (depth (s a)))
+(interact d (prune d a) (prune d (s a)))
 
-#;{(depth a) (structure a) (length (parts a)) #;a
+(show #;(length (remove-duplicates (filter symbol? (flatten (s a)))))
+      (count symbol? (remove-duplicates (flatten (s a)))))
+
+(interact c (filter (≥ cdr c) (sort (counts (filter symbol? (flatten (s a)))) #:key cdr <)))
+
+#;(show (define shares (filter (λ (st) (member '★ (flatten st)))
+                               (map share
+                                    (group first (filter (∧ list? (≥ length 2)) (parts (s a)))))))
+        (group first (filter list? shares))
+        (filter (> length 1) (group first (filter list? shares))))
+
+#;{(depth a) (structure a) (length (parts a))
              (group first (filter list? (parts a)))
              (prune 2 (group first (filter list? (parts a))))
              (prune 3 (group first (filter list? (parts a))))
              (prune 3 (group first second (filter list? (parts a))))
              (prune 4 (group first second (filter list? (parts a))))
              (prune 4 (group first second third (filter list? (parts a))))
-             (prune 4 (group first second third (filter (and/c list? (>= length 3)) (parts a))))
-             (prune 5 (group first second third (filter (and/c list? (>= length 3)) (parts a))))
-             (filter (and/c list? (>= length 2) (∘ symbol? second)) (parts a))
-             (map (curryr takef symbol?) (filter (and/c list? (>= length 2) (∘ symbol? second))
+             (prune 4 (group first second third (filter (∧ list? (≥ length 3)) (parts a))))
+             (prune 5 (group first second third (filter (∧ list? (≥ length 3)) (parts a))))
+             (filter (∧ list? (≥ length 2) (∘ symbol? second)) (parts a))
+             (map (curryr takef symbol?) (filter (∧ list? (≥ length 2) (∘ symbol? second))
                                                  (parts a)))
              (group first second (map (curryr takef symbol?)
-                                      (filter (and/c list? (>= length 2) (∘ symbol? second))
+                                      (filter (∧ list? (≥ length 2) (∘ symbol? second))
                                               (parts a))))
              (group identity (map (curryr takef symbol?)
-                                  (filter (and/c list? (>= length 2) (∘ symbol? second))
+                                  (filter (∧ list? (≥ length 2) (∘ symbol? second))
                                           (parts a))))}
 
+#| Repeated Parts |#
+(require (only-in math/statistics samples->hash))
+(define ast′ (s (inline ast)))
+(define part×reps (hash-map (samples->hash (filter list? (parts ast′))) list))
+(define-values (part reps) (values first second))
 
-#| Bottom-up |#
+(define repeats (map part (sift (≤ 2) reps part×reps)))
+(define an-index (map cons repeats (range (length repeats))))
+(define indexed-ast′ (index ast′ an-index))
 
-; Leaf data
-(define leaves (flatten ast))
-
-
-; It's only symbols and strings.
-(sort (remove-duplicates (filter symbol? leaves)) symbol<?)
-(sort (remove-duplicates (filter string? leaves)) string<?)
-(check-pred empty? (filter (not/c (or/c symbol? string?)) leaves))
-#;(check-pred empty? (filter-not (or/c symbol? string?) leaves))
-
-(show (filter (= depth 0) (parts ast))
-      (group-by first (filter (= depth 1) (parts ast)))
-      #;(group-by first (filter (λ (p) (= (depth p) 1)) (parts ast))))
+(show (size ast) (size (inline ast)) (size (s (inline ast))) (size indexed-ast′)
+      (size an-index) (+ (size an-index) 261))
+(interact d (prune d ast′) (prune d indexed-ast′))
+; Repeats can become singles when all but one use is inside another repetition.
+(show (define singles (filter (= cdr 1) (counts (filter number? (flatten indexed-ast′)))))
+      (map (curry dict-ref (map (match-lambda [`(,a . ,b) `(,b . ,a)]) an-index))
+           (map car singles)))
+(interact d (filter (≥ cdr 2) (counts (prune d (filter list? (parts indexed-ast′))))))
 
 
-#| Tags/Labels |#
+#| SXPath |#
+(show (prune 2 ast)
+      (take (prune 2 asts) 10)
+      (take (prune 2 ((sxpath '(//)) ast)) 10)
+      (andmap string? (filter (¬ list?) ((sxpath '(//)) ast)))
+      ((sxpath '(// VarName)) ast)
+      (prune 4 ((sxpath '(// TyClD)) ast))
+      (prune 3 ((sxpath '(// TyClD SynDecl)) ast))
+      (≡ ((sxpath '(// TyClD SynDecl)) ast)
+         ((sxpath '(// TyClD / SynDecl)) ast))
+      ((sxpath '(// SigD // VarName)) ast)
+      ((sxpath '(// (*or* TvName TcClsName))) ast))
 
-#;(show (empty? (filter list? (tags ast))) ; No compound tags.
-        (andmap symbol? (tags ast)) ; In fact, all are symbols.
-        (length (tags ast))
-        ; Three ways to get tags.
-        (equal? (tags ast) (map first (filter list? (parts ast))))
-        (equal? (tags ast) (map first (filter list? ((sxpath '(//)) ast)))))
-
-; Non-symbol/list tags [all would be strings, by above].
-(filter (not/c (or/c symbol? list?)) (tags ast))
+(show (group first second (prune 3 ((sxpath "//VarName/..") ast)))
+      (group first second (filter (= depth 3) asts)))
 
 
 #| --- |#
@@ -278,7 +305,7 @@
   (match t
     ['() '()]
     [`(,h . ,t) (if (or (and (list? key/s) (member h key/s))
-                        (equal? h key/s))
+                        (≡ h key/s))
                     (list t)
                     (append-map (curry find key/s) t))]
     [else (list)]))
@@ -299,56 +326,27 @@
 
 #;(map list fs patterns results)
 
-(define (unparse . ast) (apply ~a (add-between (flatten ast) " ")))
+#;(define (unparse . ast) (apply ~a (add-between (flatten ast) " ")))
 #;(unparse f ':: (add-between f-type '->))
 #;(unparse 'data data '= (add-between constructors '\|) 'deriving deriving)
 
-; Repeated sub-parts.
-(require (only-in math/statistics samples->hash))
-(define part×reps (hash-map (samples->hash (filter list? (parts (inline ast)))) list))
-(define-values (part reps) (values first second))
+#;(define symbol string->symbol)
+#;(define (from-singleton l) (match l [`(,e) e]))
+#;(define (untag pair) (match pair [`(,_ ,e) e]))
+#;(define find1 (∘ from-singleton find))
 
-(define repeats (map part (sift (<= 2) reps part×reps)))
-(define an-index (map cons repeats (range (length repeats))))
-
-(define symbol string->symbol)
-(define (from-singleton l) (match l [`(,e) e]))
-(define (untag pair) (match pair [`(,_ ,e) e]))
-(define find1 (∘ from-singleton find))
-
-#;(prune 7 ast)
-#;(prune 8 ast)
-(show (prune 8 (index (inline ast) an-index)))
-
-
-#| SXPath |#
-(show (prune 2 ast)
-      (take (prune 2 (parts ast)) 10)
-      (take (prune 2 ((sxpath '(//)) ast)) 10)
-      (andmap string? (filter (not/c list?) ((sxpath '(//)) ast)))
-      ((sxpath '(// VarName)) ast)
-      (prune 4 ((sxpath '(// TyClD)) ast))
-      (prune 3 ((sxpath '(// TyClD SynDecl)) ast))
-      (equal? ((sxpath '(// TyClD SynDecl)) ast)
-              ((sxpath '(// TyClD / SynDecl)) ast))
-      ((sxpath '(// SigD // VarName)) ast)
-      ((sxpath '(// (*or* TvName TcClsName))) ast))
-
-(show (group first second (prune 3 ((sxpath "//VarName/..") ast)))
-      (group first second (filter (= depth 3) (parts ast))))
-
-#;{(define module (filter (not/c (curry equal? "Nothing"))
+#;{(define module (filter (¬ (curry ≡ "Nothing"))
                           (untag (find1 'HsModule ast))))
    (define top-kinds '(TyClD SigD ValD))
    (define top (find top-kinds ast))
-   (check-equal? (map first module) (map first top))
+   (check-≡ (map first module) (map first top))
 
    (define top-kinds′ (group-by identity (prune 4 top)))
-   (check-equal? (length top-kinds) (length top-kinds′))
-   (check-equal? (map first top-kinds′)
-                 '((TyClD (SynDecl #;DataDecl ((⋯) (⋯) "Prefix" (⋯))))
-                   (SigD (TypeSig ((⋯) (⋯))))
-                   (ValD (FunBind ((⋯) (⋯) "WpHole")))))
+   (check-≡ (length top-kinds) (length top-kinds′))
+   (check-≡ (map first top-kinds′)
+            '((TyClD (SynDecl #;DataDecl ((⋯) (⋯) "Prefix" (⋯))))
+              (SigD (TypeSig ((⋯) (⋯))))
+              (ValD (FunBind ((⋯) (⋯) "WpHole")))))
 
    (define signatures (find 'SigD ast))
    (share signatures)
