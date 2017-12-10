@@ -322,3 +322,136 @@
                                  `(,id-c ,id-a)])])]))
 
    (map SigD)}
+
+(size ast′) (height ast′)
+(prune 3 ast′)
+(define code (filter list? (first ((sxpath '(// parsedHsModule:)) ast′))))
+(size code) (height code)
+(scale/xy 1 5 (image code))
+(map image (group first code))
+(map (∘ first first) (group first code))
+'(TyClDSynDecl: SigDTypeSig: ValDFunBind:)
+
+(define Ts (first (group first code)))
+; type Stack = [Integer]
+; type StackOp a = Stack -> (a, Stack)
+#;(define-type  Stack      (Listof Integer))
+#;(define-type (StackOp a) (→ Stack (List a Stack)))
+Ts
+(share Ts)
+'(TyClDSynDecl: (TcClsName ★) ★ "Prefix" (★ ★ ★))
+
+(define symbol string->symbol)
+(define (Type→R t)
+  (match t
+    ; (Listof _), (→ _ _), (List _ ...)
+    [`(HsAppsTyHsAppPrefixHsListTyHsAppsTyHsAppPrefixHsTyVar: "NotPromoted" ,t) `(Listof ,(Type→R t))]
+    [`(HsFunTy: ,t1 ,t2) `(→ ,(Type→R t1) ,(Type→R t2))]
+    [`(HsAppsTyHsAppPrefixHsTupleTy: "HsBoxedOrConstraintTuple" ,ts ...) `(List . ,(map Type→R ts))]
+    [`(HsAppsTyHsAppPrefixHsTyVar: "NotPromoted" ,t) (Type→R t)]
+    [`(TcClsName ,name) (symbol name)]
+    [`(TvName ,name) (symbol name)]))
+(define (T→R t)
+  (match-define `(TyClDSynDecl: (TcClsName ,name) (,_ . ,αs) "Prefix" (,rhs ...)) t)
+  `(define-type ,(if (empty? αs) (symbol name) `(,(symbol name) . ,(map symbol αs)))
+     ,(Type→R rhs)))
+(map T→R Ts)
+
+
+(define Ss (second (group first code)))
+; pop          :: Stack     -> (Integer, Stack)
+; push         :: Integer   -> Stack -> Stack
+; switchTopTwo :: Stack     -> Stack
+; popTwo       :: StackOp Integer
+; (>>>)        :: StackOp a -> StackOp b -> StackOp b
+Ss
+(share Ss)
+'(SigDTypeSig: (VarName ★) (★ (★ ★ ★) ★))
+(prune 3 Ss)
+'((SigDTypeSig: (VarName "pop") (HsWCHsIBHsFunTy: (⋯) (⋯)))
+  (SigDTypeSig: (VarName "push") (HsWCHsIBHsFunTy: (⋯) (⋯)))
+  (SigDTypeSig: (VarName "switchTopTwo") (HsWCHsIBHsFunTy: (⋯) (⋯)))
+  (SigDTypeSig: (VarName "popTwo") (HsWCHsIBHsAppsTy: (⋯) (⋯)))
+  (SigDTypeSig: (VarName ">>>") (HsWCHsIBHsFunTy: (⋯) (⋯))))
+(counts (map first (map third (prune 4 Ss))))
+'((HsWCHsIBHsFunTy: . 4)
+  (HsWCHsIBHsAppsTy: . 1))
+(share ((sxpath '(// HsWCHsIBHsFunTy:)) Ss))
+'(HsWCHsIBHsFunTy: (★ ★ ★) ★)
+(share ((sxpath '(// HsAppsTy:)) Ss))
+'(HsAppsTy:
+  (HsAppPrefixHsTyVar: "NotPromoted" (TcClsName "StackOp"))
+  (HsAppPrefixHsTyVar: "NotPromoted" (TvName ★)))
+'(HsAppsTyHsAppPrefixHsTyVar: "NotPromoted" (TcClsName ★))
+
+
+(define (SType→R t)
+  (match t
+    ; (→ _ _), (List _ ...), (T1 T2)
+    [`(,(or 'HsWCHsIBHsFunTy: 'HsFunTy:) ,t1 ,t2) `(→ ,(SType→R t1) ,(SType→R t2))]
+    [`(HsAppsTyHsAppPrefixHsTupleTy: "HsBoxedOrConstraintTuple" ,ts ...) `(List . ,(map SType→R ts))]
+    [`(HsWCHsIBHsAppsTy: ,t1 ,t2) `(,(SType→R t1) ,(SType→R t2))]
+    [`(HsAppsTyHsAppPrefixHsTyVar: "NotPromoted" ,t) (SType→R t)]
+    [`(HsAppsTy: ,t1 ,t2) `(,(SType→R t1) ,(SType→R t2))]
+    [`(HsAppPrefixHsTyVar: "NotPromoted" ,t) (SType→R t)]
+    [`(TcClsName ,name) (symbol name)]
+    [`(TvName ,name) (symbol name)]))
+    
+(define (S→R t)
+  (match-define `(SigDTypeSig: (VarName ,name) (,rhs ...)) t)
+  (define αs (map second (remove-duplicates (filter (≡ first 'TvName) (filter list? (parts t))))))
+  `(: ,(symbol name) : ,(if (empty? αs) (SType→R rhs) `(∀ ,(map symbol αs) ,(SType→R rhs)))))
+(map S→R Ss)
+
+; pop     (top:rest) =  (top, rest)
+; push    x    stack =  x:stack
+; switchTopTwo s =
+;     let (x, s1) = pop s
+;         (y, s2) = pop s1
+;         s3      = push x s2
+;         s4      = push y s3
+;     in s4
+; popTwo s = let (_, s1) = pop s
+;            in pop s1
+; op1 >>> op2 = \s ->
+;   let (_, s1) = op1 s
+;   in op2 s1
+(define Ds (third (group first code)))
+(share Ds)
+'(ValDFunBind: (VarName ★) (MG: ★ "FromSource") "WpHole")
+(prune 2 (map (∘ second third) Ds))
+'((Match: (⋯) (⋯) "Nothing" (⋯))
+  (Match: (⋯) (⋯) (⋯) "Nothing" (⋯))
+  (Match: (⋯) (⋯) "Nothing" (⋯))
+  (Match: (⋯) (⋯) "Nothing" (⋯))
+  (Match: (⋯) (⋯) (⋯) "Nothing" (⋯)))
+(prune 3 (map (∘ second third) Ds))
+'((Match: (FunRhs: (⋯) "Prefix" "NoSrcStrict")
+          (ParPatConPatIn: (⋯) (⋯)) "Nothing" (GRHSs: (⋯) "EmptyLocalBinds"))
+  (Match: (FunRhs: (⋯) "Prefix" "NoSrcStrict")
+          (VarPatVarName "x") (VarPatVarName "stack") "Nothing" (GRHSs: (⋯) "EmptyLocalBinds"))
+  (Match: (FunRhs: (⋯) "Prefix" "NoSrcStrict")
+          (VarPatVarName "s") "Nothing" (GRHSs: (⋯) "EmptyLocalBinds"))
+  (Match: (FunRhs: (⋯) "Prefix" "NoSrcStrict")
+          (VarPatVarName "s") "Nothing" (GRHSs: (⋯) "EmptyLocalBinds"))
+  (Match: (FunRhs: (⋯) "Infix" "NoSrcStrict")
+          (VarPatVarName "op1") (VarPatVarName "op2") "Nothing" (GRHSs: (⋯) "EmptyLocalBinds")))
+(prune 3 (map (∘ second second third) Ds))
+'((FunRhs: (VarName "pop") "Prefix" "NoSrcStrict")
+  (FunRhs: (VarName "push") "Prefix" "NoSrcStrict")
+  (FunRhs: (VarName "switchTopTwo") "Prefix" "NoSrcStrict")
+  (FunRhs: (VarName "popTwo") "Prefix" "NoSrcStrict")
+  (FunRhs: (VarName ">>>") "Infix" "NoSrcStrict"))
+(map image (map (∘ second third) Ds))
+
+(prune 3 (map (∘ rest second third) Ds))
+'(((FunRhs: (⋯) "Prefix" "NoSrcStrict")
+   (ParPatConPatIn: (⋯) (⋯)) "Nothing" (GRHSs: (⋯) "EmptyLocalBinds"))
+  ((FunRhs: (⋯) "Prefix" "NoSrcStrict")
+   (VarPatVarName "x") (VarPatVarName "stack") "Nothing" (GRHSs: (⋯) "EmptyLocalBinds"))
+  ((FunRhs: (⋯) "Prefix" "NoSrcStrict")
+   (VarPatVarName "s") "Nothing" (GRHSs: (⋯) "EmptyLocalBinds"))
+  ((FunRhs: (⋯) "Prefix" "NoSrcStrict")
+   (VarPatVarName "s") "Nothing" (GRHSs: (⋯) "EmptyLocalBinds"))
+  ((FunRhs: (⋯) "Infix" "NoSrcStrict")
+   (VarPatVarName "op1") (VarPatVarName "op2") "Nothing" (GRHSs: (⋯) "EmptyLocalBinds")))
